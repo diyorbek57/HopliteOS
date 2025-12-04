@@ -1,9 +1,9 @@
 
+//Dont use lin/OS libs its freetanding OS !!!!!!!!
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <unistd.h>
+
 
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -14,9 +14,6 @@
 #define MAX_FILENAME 32
 #define MAX_FILE_SIZE 1024
 
-#define CURSOR_HIDE "\033[?25l"
-#define CURSOR_SHOW "\033[?25h"
-#define CLEAR_LINE "\r"
 
 enum vga_color {
     VGA_BLACK = 0, VGA_BLUE = 1, VGA_GREEN = 2, VGA_CYAN = 3,
@@ -103,6 +100,7 @@ void timer_tick(void) {
     system_ticks++;
 }
 
+//It's shit solution for this we nned to fix it.
 uint32_t get_uptime_seconds(void) {
     return system_ticks / 18;  // Rough estimate (18.2 ticks per second)
 }
@@ -264,11 +262,6 @@ void terminal_initialize(void) {
         }
     }
 
-    // Set a character at a specific position for testing
-     // Place 'A' at (10, 5)
-
-    // Draw the cursor
-
 
 }
 
@@ -335,8 +328,6 @@ void terminal_clear(void) {
     terminal_column = 0;
 }
 
-
-// Function to draw the character at the cursor's position with inverted colors
 
 // ============= KEYBOARD =============
 static inline uint8_t inb(uint16_t port) {
@@ -646,6 +637,8 @@ void kernel_main(void) {
 
     print_prompt();
 
+
+// THIS LOOP IS BREAKING PERFOMANCE WE NEED FIX THI SHIT OTHER SOLUTION !!!!
     // Main loop
     while (1) {
         timer_tick();  // Increment timer
