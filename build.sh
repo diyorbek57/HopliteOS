@@ -8,8 +8,12 @@ nasm -f elf32 boot.asm -o boot.o
 # Compile kernel
 gcc -m32 -c kernel.c -o kernel.o -std=gnu99 -ffreestanding -O2 -Wall -Wextra
 
+#VGA
+gcc -m32  -c vga.c -o vga.o
+
 # Link
-gcc -m32 -T linker.ld -o kernel.bin -ffreestanding -O2 -nostdlib boot.o kernel.o -lgcc
+gcc -m32 -T linker.ld -o kernel.bin boot.o kernel.o vga.o -ffreestanding -nostdlib -lgcc
+
 
 # Create ISO structure
 mkdir -p isodir/boot/grub
