@@ -1,4 +1,4 @@
-
+![Hoplite OS Logo](https://github.com/diyorbek57/HopliteOS/blob/master/Hoplite%20OS%20(1280×640).png?raw=true)
 # 🛡️ Hoplite OS
 **Hoplite OS** is an educational 32-bit operating system written in **C** and **Assembly**.  
 It is designed to demonstrate how low-level systems work: bootloading, kernel development, memory management, drivers, interrupts, and hardware interaction.
