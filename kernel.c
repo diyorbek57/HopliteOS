@@ -1,9 +1,9 @@
-
-//Dont use lin/OS libs its freetanding OS !!!!!!!!
+// Don't use libc/OS libs it's a freestanding OS
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-
+#include "io.h"
+#include "vga.h"
 
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -13,7 +13,6 @@
 #define MAX_FILES 16
 #define MAX_FILENAME 32
 #define MAX_FILE_SIZE 1024
-
 
 enum vga_color {
     VGA_BLACK = 0, VGA_BLUE = 1, VGA_GREEN = 2, VGA_CYAN = 3,
@@ -100,7 +99,7 @@ void timer_tick(void) {
     system_ticks++;
 }
 
-//It's shit solution for this we nned to fix it.
+// It's a rough estimate until PIT is implemented.
 uint32_t get_uptime_seconds(void) {
     return system_ticks / 18;  // Rough estimate (18.2 ticks per second)
 }
@@ -137,17 +136,24 @@ void* kmalloc(size_t size) {
     // Find free block
     for (size_t i = 0; i < mem_blocks_count; i++) {
         if (!mem_blocks[i].used && mem_blocks[i].size >= size) {
-            mem_blocks[i].used = true;
-
-            // Split block if too large
-            if (mem_blocks[i].size > size + 16 && mem_blocks_count < 64) {
-                mem_blocks[mem_blocks_count].addr = (uint8_t*)mem_blocks[i].addr + size;
-                mem_blocks[mem_blocks_count].size = mem_blocks[i].size - size;
-                mem_blocks[mem_blocks_count].used = false;
-                mem_blocks_count++;
-
-                mem_blocks[i].size = size;
+            // If exact fit or too small to split, take whole block
+            if (mem_blocks[i].size <= size + 16 || mem_blocks_count >= 64) {
+                mem_blocks[i].used = true;
+                total_allocated += mem_blocks[i].size;
+                return mem_blocks[i].addr;
             }
+
+            // Split block
+            void* old_addr = mem_blocks[i].addr;
+            size_t old_size = mem_blocks[i].size;
+
+            mem_blocks[i].used = true;
+            mem_blocks[i].size = size;
+
+            mem_blocks[mem_blocks_count].addr = (uint8_t*)old_addr + size;
+            mem_blocks[mem_blocks_count].size = old_size - size;
+            mem_blocks[mem_blocks_count].used = false;
+            mem_blocks_count++;
 
             total_allocated += mem_blocks[i].size;
             return mem_blocks[i].addr;
@@ -164,6 +170,7 @@ void kfree(void* ptr) {
         if (mem_blocks[i].addr == ptr && mem_blocks[i].used) {
             mem_blocks[i].used = false;
             total_allocated -= mem_blocks[i].size;
+            // Note: coalescing left as future improvement
             return;
         }
     }
@@ -203,8 +210,12 @@ int fs_create(const char* name, const char* content) {
             files[i].content = (char*)kmalloc(content_len + 1);
             if (files[i].content == NULL) return -3;  // Out of memory
 
+            // safe copy: ensure null termination
+            size_t copy_len = (content_len < MAX_FILE_SIZE) ? content_len : (MAX_FILE_SIZE - 1);
+            for (size_t k = 0; k < copy_len; k++) files[i].content[k] = content[k];
+            files[i].content[copy_len] = '\0';
+
             strcpy(files[i].name, name);
-            strcpy(files[i].content, content);
             files[i].size = content_len;
             files[i].used = true;
             return 0;  // Success
@@ -227,6 +238,7 @@ int fs_delete(const char* name) {
     for (int i = 0; i < MAX_FILES; i++) {
         if (files[i].used && strcmp(files[i].name, name) == 0) {
             kfree(files[i].content);
+            files[i].content = NULL;
             files[i].used = false;
             return 0;
         }
@@ -250,19 +262,22 @@ static uint16_t* terminal_buffer;
 
 
 void terminal_initialize(void) {
-
-    terminal_row = 0;
-    terminal_column = 0;
     terminal_color = vga_entry_color(VGA_LIGHT_GREY, VGA_BLACK);
     terminal_buffer = (uint16_t*) VGA_MEMORY;
 
+    // Clear screen first
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             terminal_buffer[y * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
         }
     }
 
+    terminal_row = 0;
+    terminal_column = 0;
 
+    // Enable hardware cursor and place it at (0,0)
+    vga_enable_cursor(0, 15);
+    vga_update_cursor(terminal_row, terminal_column);
 }
 
 void terminal_setcolor(uint8_t color) {
@@ -279,6 +294,8 @@ void terminal_scroll(void) {
         terminal_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
     }
     terminal_row = VGA_HEIGHT - 1;
+    terminal_column = 0;
+    vga_update_cursor(terminal_row, terminal_column);
 }
 
 void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
@@ -286,27 +303,41 @@ void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
 }
 
 void terminal_putchar(char c) {
+    // Handle newline
     if (c == '\n') {
         terminal_column = 0;
         if (++terminal_row == VGA_HEIGHT) {
             terminal_scroll();
         }
+        // ensure cursor updated after newline handling
+        vga_update_cursor(terminal_row, terminal_column);
         return;
     }
+
+    // Handle backspace
     if (c == '\b') {
         if (terminal_column > 0) {
             terminal_column--;
             terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
+            vga_update_cursor(terminal_row, terminal_column);
         }
         return;
     }
+
+    // Normal printable character
     terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-    if (++terminal_column == VGA_WIDTH) {
+
+    // Advance column/row and handle wrap
+    terminal_column++;
+    if (terminal_column >= VGA_WIDTH) {
         terminal_column = 0;
         if (++terminal_row == VGA_HEIGHT) {
             terminal_scroll();
         }
     }
+
+    // Update cursor AFTER all updates to row/column and after any scroll
+    vga_update_cursor(terminal_row, terminal_column);
 }
 
 void terminal_write(const char* data, size_t size) {
@@ -326,15 +357,10 @@ void terminal_clear(void) {
     }
     terminal_row = 0;
     terminal_column = 0;
+    vga_update_cursor(terminal_row, terminal_column);
 }
-
 
 // ============= KEYBOARD =============
-static inline uint8_t inb(uint16_t port) {
-    uint8_t ret;
-    asm volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
-}
 
 static uint8_t last_scancode = 0;
 
@@ -538,11 +564,10 @@ void cmd_about(void) {
     terminal_setcolor(vga_entry_color(VGA_LIGHT_CYAN, VGA_BLACK));
     terminal_writestring("================================\n");
     terminal_setcolor(vga_entry_color(VGA_YELLOW, VGA_BLACK));
-    terminal_writestring("      Hoplite Operating System\n");
+    terminal_writestring("   Hoplite Operating System\n");
     terminal_setcolor(vga_entry_color(VGA_LIGHT_CYAN, VGA_BLACK));
     terminal_writestring("================================\n");
     terminal_setcolor(vga_entry_color(VGA_WHITE, VGA_BLACK));
-
 }
 
 void cmd_version(void) {
@@ -637,11 +662,9 @@ void kernel_main(void) {
 
     print_prompt();
 
-
-// THIS LOOP IS BREAKING PERFOMANCE WE NEED FIX THI SHIT OTHER SOLUTION !!!!
     // Main loop
     while (1) {
-        timer_tick();  // Increment timer
+        timer_tick();  // Increment timer (temporary)
 
         char key = get_key();
         if (key != 0) {
@@ -660,8 +683,7 @@ void kernel_main(void) {
                     terminal_putchar(key);
                 }
             }
-
-            for (volatile int i = 0; i < 100000; i++);
         }
+        // No busy-wait here; keep loop tight until input arrives or timer/PIT is implemented
     }
 }
