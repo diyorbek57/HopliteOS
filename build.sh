@@ -11,8 +11,11 @@ gcc -m32 -c kernel.c -o kernel.o -std=gnu99 -ffreestanding -O2 -Wall -Wextra
 #VGA
 gcc -m32  -c vga.c -o vga.o
 
+#Keyboard
+gcc -m32  -c keyboard.c -o keyboard.o
+
 # Link
-gcc -m32 -T linker.ld -o kernel.bin boot.o kernel.o vga.o -ffreestanding -nostdlib -lgcc
+gcc -m32 -T linker.ld -o kernel.bin boot.o kernel.o vga.o keyboard.o -ffreestanding -nostdlib -lgcc
 
 
 # Create ISO structure

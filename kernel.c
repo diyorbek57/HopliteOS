@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include "io.h"
 #include "vga.h"
-
+#include "keyboard.h"
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 #define VGA_MEMORY 0xB8000
@@ -314,16 +314,6 @@ void terminal_putchar(char c) {
         return;
     }
 
-    // Handle backspace
-    if (c == '\b') {
-        if (terminal_column > 0) {
-            terminal_column--;
-            terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
-            vga_update_cursor(terminal_row, terminal_column);
-        }
-        return;
-    }
-
     // Normal printable character
     terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
 
@@ -360,6 +350,19 @@ void terminal_clear(void) {
     vga_update_cursor(terminal_row, terminal_column);
 }
 
+void terminal_backspace() {
+    if (terminal_column > 0) {
+        terminal_column--;
+
+        // Стираем символ пробелом
+        terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
+
+        // Обновляем аппаратный курсор
+        vga_update_cursor(terminal_row, terminal_column);
+    }
+}
+
+
 // ============= KEYBOARD =============
 
 static uint8_t last_scancode = 0;
@@ -379,8 +382,18 @@ char scancode_to_char(uint8_t scancode) {
 
 char get_key(void) {
     uint8_t scancode = inb(0x60);
-    if (scancode & 0x80) return 0;
-    if (scancode == last_scancode) return 0;
+
+    // Key release
+    if (scancode & 0x80) {
+        last_scancode = 0;  // Reset on release - GOOD
+        return 0;
+    }
+
+    // ADD THIS: Ignore if same as last scancode (key still held)
+    if (scancode == last_scancode) {
+        return 0;
+    }
+
     last_scancode = scancode;
     return scancode_to_char(scancode);
 }
@@ -675,7 +688,7 @@ void kernel_main(void) {
             } else if (key == '\b') {
                 if (command_index > 0) {
                     command_index--;
-                    terminal_putchar('\b');
+                    terminal_backspace();
                 }
             } else {
                 if (command_index < COMMAND_BUFFER_SIZE - 1) {
@@ -683,6 +696,9 @@ void kernel_main(void) {
                     terminal_putchar(key);
                 }
             }
+
+            // ADD THIS: Delay after any key to prevent repeats
+            for (volatile int i = 0; i < 500000; i++);
         }
         // No busy-wait here; keep loop tight until input arrives or timer/PIT is implemented
     }
